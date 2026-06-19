@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         values = [p.t_s, p.rpm, p.torque_pct, p.temp_c, p.shear_rate, p.shear_stress, p.viscosity_cp]
         for col, val in enumerate(values):
             self.data_table.setItem(row, col, QTableWidgetItem(f"{val:.3f}"))
+        self.data_table.scrollToBottom()
 
     def _update_plots(self):
         if not self.run or not self.run.points:
