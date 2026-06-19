@@ -22,6 +22,7 @@ class FitDialog(QDialog):
         self.resize(700, 550)
         self.shear_rate = shear_rate
         self.shear_stress = shear_stress
+        self.last_result = None
 
         layout = QVBoxLayout(self)
         top_row = QHBoxLayout()
@@ -57,6 +58,7 @@ class FitDialog(QDialog):
             self.result_text.setPlainText(f"Fit failed: {exc}")
             return
 
+        self.last_result = result
         self._plot_raw()
         gamma_smooth = np.linspace(max(self.shear_rate.min(), 1e-6), self.shear_rate.max(), 200)
         tau_pred = analysis.predict(model_name, result.params, gamma_smooth)

@@ -18,10 +18,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from viscobridge import io_utils
+from viscobridge import io_utils, report
 from viscobridge.instruments import InstrumentDriver, InstrumentError, SerialInstrument, SimulatedInstrument
 from viscobridge.models import DataPoint, Run, TestStep
 from viscobridge.ui.calibration_dialog import CalibrationDialog
+from viscobridge.ui.compare_dialog import CompareDialog
 from viscobridge.ui.connect_dialog import ConnectDialog
 from viscobridge.ui.fit_dialog import FitDialog
 from viscobridge.ui.method_editor import MethodEditor
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
         self.current_step: TestStep | None = None
         self.step_elapsed = 0.0
         self.run_elapsed = 0.0
+        self.last_fit_result = None
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -73,8 +75,11 @@ class MainWindow(QMainWindow):
         self.save_btn = QPushButton("Save Run...")
         self.load_btn = QPushButton("Load Run...")
         self.export_btn = QPushButton("Export CSV...")
+        self.report_btn = QPushButton("Export Report...")
+        self.compare_btn = QPushButton("Compare Runs...")
         for b in (self.connect_btn, self.start_btn, self.stop_btn, self.fit_btn,
-                  self.save_btn, self.load_btn, self.export_btn):
+                  self.save_btn, self.load_btn, self.export_btn, self.report_btn,
+                  self.compare_btn):
             btn_row.addWidget(b)
         right_layout.addLayout(btn_row)
 
@@ -85,6 +90,8 @@ class MainWindow(QMainWindow):
         self.save_btn.clicked.connect(self.save_run)
         self.load_btn.clicked.connect(self.load_run)
         self.export_btn.clicked.connect(self.export_csv)
+        self.report_btn.clicked.connect(self.export_report)
+        self.compare_btn.clicked.connect(self.open_compare_dialog)
         self.stop_btn.setEnabled(False)
 
         tabs = QTabWidget()
@@ -110,11 +117,13 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Save Run...", self.save_run)
         file_menu.addAction("Load Run...", self.load_run)
         file_menu.addAction("Export CSV...", self.export_csv)
+        file_menu.addAction("Export Report...", self.export_report)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
 
         analysis_menu = self.menuBar().addMenu("&Analysis")
         analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
+        analysis_menu.addAction("Compare Runs...", self.open_compare_dialog)
 
         instrument_menu = self.menuBar().addMenu("&Instrument")
         instrument_menu.addAction("Calibration Check (30s, no spindle)...", self.open_calibration_dialog)
@@ -182,6 +191,7 @@ class MainWindow(QMainWindow):
         self.step_queue = list(method.steps)
         self.current_step = None
         self.run_elapsed = 0.0
+        self.last_fit_result = None
         self.data_table.setRowCount(0)
         for plot in (self.viscosity_plot, self.torque_plot, self.temp_plot):
             plot.clear()
@@ -303,6 +313,12 @@ class MainWindow(QMainWindow):
         tau = np.array([p.shear_stress for p in self.run.points])
         dlg = FitDialog(gamma, tau, parent=self)
         dlg.exec()
+        if dlg.last_result is not None:
+            self.last_fit_result = dlg.last_result
+
+    def open_compare_dialog(self):
+        dlg = CompareDialog(parent=self)
+        dlg.exec()
 
     # --------------------------------------------------------------- i/o
     def save_run(self):
@@ -335,3 +351,13 @@ class MainWindow(QMainWindow):
         if path:
             io_utils.export_csv(self.run, path)
             self.statusBar().showMessage(f"Exported CSV to {path}")
+
+    def export_report(self):
+        if not self.run:
+            QMessageBox.information(self, "No run", "There is no run to report on yet.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Report", filter="HTML Report (*.html)")
+        if path:
+            fit_result = self.last_fit_result if self.run.points else None
+            report.generate_html_report(self.run, path, fit_result=fit_result)
+            self.statusBar().showMessage(f"Exported report to {path}")
