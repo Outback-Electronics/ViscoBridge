@@ -27,7 +27,9 @@ from viscobridge.ui.connect_dialog import ConnectDialog
 from viscobridge.ui.fit_dialog import FitDialog
 from viscobridge.ui.method_editor import MethodEditor
 from viscobridge.ui.plot_widget import PlotWidget
+from viscobridge.ui.surface3d_dialog import Surface3DDialog
 from viscobridge.ui.temp_fit_dialog import TempFitDialog
+from viscobridge.ui.thixo3d_dialog import Thixo3DDialog
 
 DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
                 "Shear Stress (dyne/cm^2)", "Viscosity (cP)"]
@@ -129,6 +131,9 @@ class MainWindow(QMainWindow):
         analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
         analysis_menu.addAction("Fit Temperature Dependence...", self.open_temp_fit_dialog)
         analysis_menu.addAction("Compare Runs...", self.open_compare_dialog)
+        analysis_menu.addSeparator()
+        analysis_menu.addAction("3D Viscosity Surface...", self.open_surface3d_dialog)
+        analysis_menu.addAction("3D Thixotropy Loop...", self.open_thixo3d_dialog)
 
         instrument_menu = self.menuBar().addMenu("&Instrument")
         instrument_menu.addAction("Calibration Check (30s, no spindle)...", self.open_calibration_dialog)
@@ -357,6 +362,17 @@ class MainWindow(QMainWindow):
             )
             return
         dlg = TempFitDialog(temp, visc, parent=self)
+        dlg.exec()
+
+    def open_surface3d_dialog(self):
+        dlg = Surface3DDialog(parent=self)
+        dlg.exec()
+
+    def open_thixo3d_dialog(self):
+        if not self.run or not self.run.points:
+            QMessageBox.information(self, "No data", "Run a test (or load one) before viewing a 3D thixotropy loop.")
+            return
+        dlg = Thixo3DDialog(self.run, parent=self)
         dlg.exec()
 
     # --------------------------------------------------------------- i/o

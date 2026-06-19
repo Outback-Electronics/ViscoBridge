@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from viscobridge import analysis
+from viscobridge.ui.plot3d_widget import Plot3DWidget
 from viscobridge.ui.plot_widget import PlotWidget
 
 
@@ -40,8 +41,12 @@ class FitDialog(QDialog):
         tabs = QTabWidget()
         self.plot = PlotWidget("Shear Rate (1/s)", "Shear Stress (dyne/cm^2)", "Flow Curve")
         self.residual_plot = PlotWidget("Shear Rate (1/s)", "Residual (dyne/cm^2)", "Fit Residuals")
+        self.ellipsoid_plot = Plot3DWidget("Param 1", "Param 2", "Param 3", "Parameter Confidence Ellipsoid (2-sigma)")
         tabs.addTab(self.plot, "Flow Curve")
         tabs.addTab(self.residual_plot, "Residuals")
+        self.ellipsoid_tab_index = tabs.addTab(self.ellipsoid_plot, "Confidence Ellipsoid (3-param models)")
+        tabs.setTabEnabled(self.ellipsoid_tab_index, False)
+        self.tabs = tabs
         layout.addWidget(tabs)
 
         self.result_text = QTextEdit()
@@ -73,6 +78,17 @@ class FitDialog(QDialog):
         self.residual_plot.clear()
         self.residual_plot.ax.axhline(0, color="gray", linewidth=0.8)
         self.residual_plot.plot_xy(result.x, result.residuals, label="Residual", marker="o", linestyle="none")
+
+        self.ellipsoid_plot.clear()
+        if len(result.params) == 3:
+            x, y, z = analysis.confidence_ellipsoid(result.params, result.covariance, n_std=2.0)
+            self.ellipsoid_plot.set_labels(*result.param_names, "Confidence Ellipsoid (2-sigma)")
+            self.ellipsoid_plot.wireframe(x, y, z)
+            self.ellipsoid_plot.scatter([result.params[0]], [result.params[1]], [result.params[2]],
+                                         label="Fitted value", color="red")
+            self.tabs.setTabEnabled(self.ellipsoid_tab_index, True)
+        else:
+            self.tabs.setTabEnabled(self.ellipsoid_tab_index, False)
 
         lower_better = "lower AIC/BIC indicates a better-supported model for the same data"
         self.result_text.setPlainText(f"{result}\n\n({lower_better})")
