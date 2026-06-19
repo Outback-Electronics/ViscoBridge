@@ -27,6 +27,7 @@ from viscobridge.ui.connect_dialog import ConnectDialog
 from viscobridge.ui.fit_dialog import FitDialog
 from viscobridge.ui.method_editor import MethodEditor
 from viscobridge.ui.plot_widget import PlotWidget
+from viscobridge.ui.temp_fit_dialog import TempFitDialog
 
 DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
                 "Shear Stress (dyne/cm^2)", "Viscosity (cP)"]
@@ -45,6 +46,9 @@ class MainWindow(QMainWindow):
         self.step_elapsed = 0.0
         self.run_elapsed = 0.0
         self.last_fit_result = None
+        self.instrument_id = ""
+        self.zero_offset_counts: int | None = None
+        self.last_calibration_record: dict | None = None
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -123,6 +127,7 @@ class MainWindow(QMainWindow):
 
         analysis_menu = self.menuBar().addMenu("&Analysis")
         analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
+        analysis_menu.addAction("Fit Temperature Dependence...", self.open_temp_fit_dialog)
         analysis_menu.addAction("Compare Runs...", self.open_compare_dialog)
 
         instrument_menu = self.menuBar().addMenu("&Instrument")
@@ -173,6 +178,15 @@ class MainWindow(QMainWindow):
             self.instrument = None
             return
 
+        self.instrument_id = ""
+        self.zero_offset_counts = None
+        if isinstance(self.instrument, SerialInstrument):
+            try:
+                self.instrument_id = self.instrument.identify()
+            except InstrumentError:
+                pass
+            self.zero_offset_counts = self.instrument.zero_offset_counts
+
         self.connect_btn.setText("Disconnect")
         self.statusBar().showMessage(status)
 
@@ -187,7 +201,14 @@ class MainWindow(QMainWindow):
             return
 
         sample = self.method_editor.get_sample()
-        self.run = Run(method=method, sample=sample, timestamp=datetime.now(timezone.utc).isoformat())
+        self.run = Run(
+            method=method,
+            sample=sample,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            instrument_id=self.instrument_id,
+            zero_offset_counts=self.zero_offset_counts,
+            calibration_check=self.last_calibration_record,
+        )
         self.step_queue = list(method.steps)
         self.current_step = None
         self.run_elapsed = 0.0
@@ -303,6 +324,8 @@ class MainWindow(QMainWindow):
             return
         dlg = CalibrationDialog(self.instrument, duration_s=30.0, parent=self)
         dlg.exec()
+        if dlg.last_record is not None:
+            self.last_calibration_record = dlg.last_record
 
     # ----------------------------------------------------------- analysis
     def open_fit_dialog(self):
@@ -318,6 +341,22 @@ class MainWindow(QMainWindow):
 
     def open_compare_dialog(self):
         dlg = CompareDialog(parent=self)
+        dlg.exec()
+
+    def open_temp_fit_dialog(self):
+        if not self.run or not self.run.points:
+            QMessageBox.information(self, "No data", "Run a test (or load one) before fitting a model.")
+            return
+        temp = np.array([p.temp_c for p in self.run.points])
+        visc = np.array([p.viscosity_cp for p in self.run.points])
+        if len(set(np.round(temp, 1))) < 3:
+            QMessageBox.information(
+                self, "Not enough temperature variation",
+                "This run doesn't span enough distinct temperatures to fit a "
+                "temperature-dependence model. Use a Temperature Sweep test."
+            )
+            return
+        dlg = TempFitDialog(temp, visc, parent=self)
         dlg.exec()
 
     # --------------------------------------------------------------- i/o

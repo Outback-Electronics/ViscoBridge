@@ -191,6 +191,10 @@ class SerialInstrument(InstrumentDriver):
     def is_connected(self) -> bool:
         return self._serial is not None and self._serial.is_open
 
+    @property
+    def zero_offset_counts(self) -> int:
+        return self._zero_offset
+
     def _send(self, body: str, timeout: float | None = None) -> str:
         if self._serial is None or not self._serial.is_open:
             raise InstrumentError("Instrument not connected")

@@ -16,20 +16,23 @@ from viscobridge import analysis
 from viscobridge.ui.plot_widget import PlotWidget
 
 
-class FitDialog(QDialog):
-    def __init__(self, shear_rate: np.ndarray, shear_stress: np.ndarray, parent=None):
+class TempFitDialog(QDialog):
+    """Fits Arrhenius or WLF temperature-dependence models to viscosity vs.
+    temperature data (e.g. from a Temperature Sweep test)."""
+
+    def __init__(self, temp_c: np.ndarray, viscosity: np.ndarray, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Flow Curve Model Fit")
+        self.setWindowTitle("Temperature Dependence Fit")
         self.resize(750, 600)
-        self.shear_rate = shear_rate
-        self.shear_stress = shear_stress
+        self.temp_c = temp_c
+        self.viscosity = viscosity
         self.last_result = None
 
         layout = QVBoxLayout(self)
         top_row = QHBoxLayout()
         top_row.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
-        self.model_combo.addItems(list(analysis.MODELS.keys()))
+        self.model_combo.addItems(list(analysis.TEMP_MODELS.keys()))
         top_row.addWidget(self.model_combo)
         fit_btn = QPushButton("Fit")
         fit_btn.clicked.connect(self.run_fit)
@@ -38,9 +41,9 @@ class FitDialog(QDialog):
         layout.addLayout(top_row)
 
         tabs = QTabWidget()
-        self.plot = PlotWidget("Shear Rate (1/s)", "Shear Stress (dyne/cm^2)", "Flow Curve")
-        self.residual_plot = PlotWidget("Shear Rate (1/s)", "Residual (dyne/cm^2)", "Fit Residuals")
-        tabs.addTab(self.plot, "Flow Curve")
+        self.plot = PlotWidget("Temperature (C)", "Viscosity (cP)", "Viscosity vs Temperature")
+        self.residual_plot = PlotWidget("Temperature (C)", "Residual (cP)", "Fit Residuals")
+        tabs.addTab(self.plot, "Viscosity vs Temperature")
         tabs.addTab(self.residual_plot, "Residuals")
         layout.addWidget(tabs)
 
@@ -53,26 +56,25 @@ class FitDialog(QDialog):
 
     def _plot_raw(self):
         self.plot.clear()
-        self.plot.plot_xy(self.shear_rate, self.shear_stress, label="Data", marker="o", linestyle="none")
+        self.plot.plot_xy(self.temp_c, self.viscosity, label="Data", marker="o", linestyle="none")
         self.residual_plot.clear()
 
     def run_fit(self):
         model_name = self.model_combo.currentText()
         try:
-            result = analysis.fit_model(model_name, self.shear_rate, self.shear_stress)
+            result = analysis.fit_temperature_model(model_name, self.temp_c, self.viscosity)
         except Exception as exc:
             self.result_text.setPlainText(f"Fit failed: {exc}")
             return
 
         self.last_result = result
         self._plot_raw()
-        gamma_smooth = np.linspace(max(self.shear_rate.min(), 1e-6), self.shear_rate.max(), 200)
-        tau_pred = analysis.predict(model_name, result.params, gamma_smooth)
-        self.plot.plot_xy(gamma_smooth, tau_pred, label=f"{model_name} fit", marker="none", linestyle="-")
+        temp_smooth = np.linspace(self.temp_c.min(), self.temp_c.max(), 200)
+        visc_pred = analysis.predict_temperature(model_name, result.params, temp_smooth)
+        self.plot.plot_xy(temp_smooth, visc_pred, label=f"{model_name} fit", marker="none", linestyle="-")
 
         self.residual_plot.clear()
         self.residual_plot.ax.axhline(0, color="gray", linewidth=0.8)
         self.residual_plot.plot_xy(result.x, result.residuals, label="Residual", marker="o", linestyle="none")
 
-        lower_better = "lower AIC/BIC indicates a better-supported model for the same data"
-        self.result_text.setPlainText(f"{result}\n\n({lower_better})")
+        self.result_text.setPlainText(str(result))
