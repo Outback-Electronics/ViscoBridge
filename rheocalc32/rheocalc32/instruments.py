@@ -114,50 +114,56 @@ class SimulatedInstrument(InstrumentDriver):
 
 
 # ---------------------------------------------------------------------------
-# SerialInstrument: real hardware over USB / RS-232.
+# SerialInstrument: real hardware over RS-232 (or USB-to-RS232 adapter).
 #
-# IMPORTANT: Brookfield does not publish the exact byte-level command set
-# the DV3T/DV3T-family rheometer speaks to RheoCalc/RheocalcT over its
-# USB-serial link. The commands below are a best-effort placeholder
-# ASCII protocol (plain-text command + CR, comma-separated reply),
-# modeled on Brookfield's legacy DV-II+/DV-III "Standard Serial Command"
-# style. They are NOT guaranteed to match your DV3 Ultra+ firmware.
+# This implements Brookfield's documented "DV-III Ultra to Computer Command
+# Set" (Appendix G of the DV-III Ultra Operating Instructions manual),
+# which the DV3 Ultra+ (firmware-compatible with DV-III Ultra) speaks:
 #
-# To adapt this to your real instrument:
-#   1. Capture USB traffic between RheocalcT and the instrument (e.g.
-#      with a USB protocol analyzer, or by sniffing the virtual COM
-#      port RheocalcT opens), or get the protocol doc from Brookfield
-#      support.
-#   2. Edit only the four COMMAND TEMPLATE strings below to match.
-# Everything else (the public connect/set_speed/set_temperature/read
-# interface used by the rest of the app) stays the same.
+#   COMMAND      FROM COMPUTER     RESPONSE FROM INSTRUMENT
+#   K(Reset)     <K><CR>           no response
+#   E(nable)     <E><CR>           <E><ss><CR>
+#   R(etrieve)   <R><CR>           <R><vvvv><tttt><ss><CR>
+#   V(elocity)   <V><xxxx><CR>     <V><ss><CR>
+#   I(dentify)   <I><CR>           <I><ddd><mm><CR>
+#   Z(ero)       <Z><CR>           <Z><vvvv><ss><CR>
+#
+# vvvv = torque transducer reading, 4 hex digits (~0400h at rest/0%,
+#        ~2B00h at 100% torque -- 0x2700 = 9984 counts full scale).
+# tttt = temperature reading, 4 hex digits (2700h = 0 degC, 40 counts/degC).
+# xxxx = commanded speed in RPM * 10, as 4 hex digits.
+# ss   = 2-hex-digit status byte.
+# Port settings: 9600 baud, 8 data bits, no parity, 1 stop bit, no handshake.
+#
+# Note: this command set has no "set temperature" command -- the DV-III
+# Ultra only reports its own temperature probe. An external bath/Thermosel
+# is controlled through its own separate cable, not through this protocol,
+# so set_temperature() here is a no-op.
 # ---------------------------------------------------------------------------
 
-# --- COMMAND TEMPLATES (edit to match your instrument) --------------------
-CMD_SET_SPEED = "SS{rpm:07.1f}"          # set spindle speed in RPM
-CMD_SET_TEMPERATURE = "ST{temp:07.1f}"   # set target temperature in deg C
-CMD_READ = "RD"                          # request a measurement reply
-# Expected reply to CMD_READ: "<rpm>,<torque_pct>,<temp_c>"
-# ---------------------------------------------------------------------------
+TORQUE_FULL_SCALE_COUNTS = 0x2B00 - 0x0400  # ~9984 counts == 100% torque
+TEMP_ZERO_COUNTS = 0x2700  # counts at 0 degC
+TEMP_COUNTS_PER_DEGREE = 40.0
 
 
 class SerialInstrument(InstrumentDriver):
-    """Driver for a real DV3T-family rheometer over its USB (virtual COM
-    port) or RS-232 link. See the protocol caveat above the COMMAND
-    TEMPLATE block — verify/adjust the command strings against your
-    instrument before relying on this for measurements.
-    """
+    """Driver for a real DV-III Ultra / DV3 Ultra+ rheometer over RS-232
+    (directly, or via a USB-to-RS232 adapter), using Brookfield's
+    documented Appendix G command set."""
 
     def __init__(self, port: str, baudrate: int = 9600, timeout: float = 1.0):
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self._serial = None
+        self._zero_offset = 0x0400
+        self._rpm = 0.0
+        self._status = "00"
 
     @staticmethod
     def list_ports() -> list[str]:
         """Returns the device names of available serial ports (including
-        the USB virtual COM port a DV3T enumerates as when plugged in)."""
+        a USB-to-RS232 adapter's enumerated port)."""
         from serial.tools import list_ports
 
         return [p.device for p in list_ports.comports()]
@@ -165,10 +171,19 @@ class SerialInstrument(InstrumentDriver):
     def connect(self) -> None:
         import serial  # imported lazily so the simulated driver works without pyserial
 
-        self._serial = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+        self._serial = serial.Serial(
+            self.port, self.baudrate, bytesize=8, parity="N", stopbits=1, timeout=self.timeout
+        )
+        self._serial.reset_input_buffer()
+        self._send("E")
+        self._zero()
 
     def disconnect(self) -> None:
         if self._serial is not None:
+            try:
+                self._send("K")
+            except InstrumentError:
+                pass
             self._serial.close()
             self._serial = None
 
@@ -176,26 +191,53 @@ class SerialInstrument(InstrumentDriver):
     def is_connected(self) -> bool:
         return self._serial is not None and self._serial.is_open
 
-    def _command(self, cmd: str) -> str:
-        if not self.is_connected:
+    def _send(self, body: str) -> str:
+        if self._serial is None or not self._serial.is_open:
             raise InstrumentError("Instrument not connected")
-        self._serial.write((cmd + "\r").encode("ascii"))
-        return self._serial.readline().decode("ascii", errors="replace").strip()
+        self._serial.write((body + "\r").encode("ascii"))
+        raw = self._serial.read_until(b"\r")
+        reply = raw.decode("ascii", errors="replace").strip()
+        if not reply:
+            raise InstrumentError(f"No response from instrument to command {body!r}")
+        return reply
+
+    def _zero(self) -> None:
+        reply = self._send("Z")
+        if not reply.startswith("Z") or len(reply) < 7:
+            raise InstrumentError(f"Unexpected Zero reply: {reply!r}")
+        self._zero_offset = int(reply[1:5], 16)
+
+    def identify(self) -> str:
+        """Returns the model code string, e.g. 'DV3RV'. Mainly useful to
+        confirm the link is actually talking to the instrument."""
+        reply = self._send("I")
+        if not reply.startswith("I") or len(reply) < 6:
+            raise InstrumentError(f"Unexpected Identify reply: {reply!r}")
+        return reply[1:4] + reply[4:6]
 
     def set_speed(self, rpm: float) -> None:
-        self._command(CMD_SET_SPEED.format(rpm=rpm))
+        xxxx = format(max(0, min(0xFFFF, round(rpm * 10))), "04X")
+        reply = self._send(f"V{xxxx}")
+        if not reply.startswith("V") or len(reply) < 3:
+            raise InstrumentError(f"Unexpected Velocity reply: {reply!r}")
+        self._status = reply[1:3]
+        self._rpm = rpm
 
     def set_temperature(self, temp_c: float) -> None:
-        self._command(CMD_SET_TEMPERATURE.format(temp=temp_c))
+        # No documented command to set a target temperature on the
+        # DV-III Ultra / DV3 Ultra+ -- see module docstring above.
+        pass
 
     def read(self) -> tuple[float, float, float]:
-        reply = self._command(CMD_READ)
-        try:
-            rpm_s, torque_s, temp_s = reply.split(",")
-            return float(rpm_s), float(torque_s), float(temp_s)
-        except ValueError as exc:
+        reply = self._send("R")
+        if not reply.startswith("R") or len(reply) < 11:
             raise InstrumentError(
-                f"Unexpected instrument reply: {reply!r}. The command set in "
-                "instruments.py (CMD_SET_SPEED/CMD_SET_TEMPERATURE/CMD_READ) "
-                "likely needs adjusting for your instrument's firmware."
-            ) from exc
+                f"Unexpected Retrieve reply: {reply!r}. Expected <R><vvvv><tttt><ss>."
+            )
+        vvvv = int(reply[1:5], 16)
+        tttt = int(reply[5:9], 16)
+        self._status = reply[9:11]
+        torque_pct = (vvvv - self._zero_offset) / TORQUE_FULL_SCALE_COUNTS * 100.0
+        temp_c = (tttt - TEMP_ZERO_COUNTS) / TEMP_COUNTS_PER_DEGREE
+        return self._rpm, max(0.0, torque_pct), temp_c
+

@@ -40,11 +40,10 @@ class ConnectDialog(QDialog):
         layout.addLayout(form)
 
         layout.addWidget(QLabel(
-            "Note: the exact command protocol for the DV3T family is not\n"
-            "publicly documented by Brookfield. This connects over the port\n"
-            "above using a best-effort command set (see instruments.py) -\n"
-            "verify readings against the instrument's own display and adjust\n"
-            "the CMD_* templates there if needed."
+            "Uses Brookfield's documented DV-III Ultra / DV3 Ultra+ command\n"
+            "set (Appendix G): 9600 baud, 8-N-1, no handshake. If you're on a\n"
+            "different model's USB virtual COM port, verify readings against\n"
+            "the instrument's own display first."
         ))
         layout.addWidget(self.sim_radio)
 

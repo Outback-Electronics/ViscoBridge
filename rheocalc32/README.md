@@ -44,20 +44,31 @@ DV3T Operating Instructions (Manual No. M13-167-A0415), Appendix D —
 If you're using a Special Spindle (custom geometry), edit SMC/SRC in the
 Method panel to match its calibration certificate.
 
-**Real hardware caveat:** Brookfield does not publish the byte-level
-command protocol the DV3T speaks over its USB virtual-COM-port link to
-RheoCalc/RheocalcT — only Brookfield's own software is documented to
-use it. `instruments.py` ships a best-effort placeholder ASCII command
-set (`CMD_SET_SPEED`, `CMD_SET_TEMPERATURE`, `CMD_READ`) modeled on
-Brookfield's older DV-II+/DV-III serial style, clearly marked at the top
-of the file. If it doesn't talk to your unit out of the box:
+**Real hardware:** `instruments.py`'s `SerialInstrument` implements
+Brookfield's documented "DV-III Ultra to Computer Command Set" (Appendix
+G of the DV-III Ultra Operating Instructions manual), which the DV3
+Ultra+ also speaks (it runs DV-III Ultra-compatible firmware). This is a
+real, published protocol — not a guess:
 
-1. Capture the USB traffic between RheocalcT and the instrument (USB
-   protocol analyzer, or by sniffing the virtual COM port RheocalcT
-   opens), or request the protocol document from Brookfield support.
-2. Edit just the `CMD_*` template strings in `instruments.py` to match —
-   the rest of the driver interface (`connect`/`set_speed`/
-   `set_temperature`/`read`) doesn't need to change.
+- Single-letter ASCII commands terminated by `\r`: `K` (reset), `E`
+  (enable), `R` (retrieve reading), `V` + 4 hex digits (set speed,
+  RPM*10), `I` (identify), `Z` (zero).
+- `connect()` sends `E` then `Z` to calibrate a zero-torque offset that's
+  subtracted from every subsequent reading.
+- `read()` parses the `<R><vvvv><tttt><ss>` reply: `vvvv` is the torque
+  transducer count (4 hex digits, ~0x0400 at 0% torque, ~0x2B00 at 100%),
+  `tttt` is the temperature count (4 hex digits, 0x2700 = 0 degC, 40
+  counts/degC), `ss` is a status byte.
+- Port settings: 9600 baud, 8 data bits, no parity, 1 stop bit, no
+  handshake.
+- The DV-III Ultra command set has no "set temperature" command — it only
+  reports its own probe reading. An external bath/Thermosel is controlled
+  through its own separate cable, so `set_temperature()` here is a
+  documented no-op.
+
+If you're on a different model whose USB virtual COM port doesn't speak
+this protocol, verify readings against the instrument's own display
+before trusting the GUI.
 
 Use **Connect...** in the toolbar to pick "Real instrument" and a serial
 port (auto-detected, including USB-serial enumeration), or "Simulated
