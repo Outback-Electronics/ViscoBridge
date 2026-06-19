@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
             return
         self.current_step = self.step_queue.pop(0)
         self.step_elapsed = 0.0
-        if self.current_step.target_temp_c and self.instrument:
+        if self.current_step.target_temp_c is not None and self.instrument:
             self.instrument.set_temperature(self.current_step.target_temp_c)
 
     def stop_run(self):
