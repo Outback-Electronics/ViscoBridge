@@ -4,6 +4,13 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+# mplot3d must be imported explicitly to register the "3d" projection with
+# matplotlib's projection registry -- relying on matplotlib to pull it in
+# implicitly breaks when multiple matplotlib installs are on the path
+# (e.g. a system apt package shadowing/shadowed-by a pip install), which
+# can silently leave the registry without "3d".
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
 
 class Plot3DWidget(QWidget):
     """A 3D matplotlib canvas (mplot3d) for surfaces, scatter clouds, and
@@ -13,7 +20,18 @@ class Plot3DWidget(QWidget):
         super().__init__(parent)
         self.figure = Figure(figsize=(6, 5), tight_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.ax = self.figure.add_subplot(111, projection="3d")
+        try:
+            self.ax = self.figure.add_subplot(111, projection="3d")
+        except ValueError as exc:
+            raise RuntimeError(
+                "matplotlib's 3D toolkit (mplot3d) isn't available. This usually "
+                "means two conflicting matplotlib installations are on your "
+                "Python path (e.g. an apt 'python3-matplotlib' package and a "
+                "pip-installed matplotlib under ~/.local). Run "
+                "`pip show matplotlib` and `apt list --installed | grep matplotlib` "
+                "to check, and keep only one (pip install --user --force-reinstall "
+                "matplotlib is usually the fix)."
+            ) from exc
         self.set_labels(xlabel, ylabel, zlabel, title)
 
         layout = QVBoxLayout(self)
