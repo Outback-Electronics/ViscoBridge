@@ -365,14 +365,22 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def open_surface3d_dialog(self):
-        dlg = Surface3DDialog(parent=self)
+        try:
+            dlg = Surface3DDialog(parent=self)
+        except RuntimeError as exc:
+            QMessageBox.critical(self, "3D plotting unavailable", str(exc))
+            return
         dlg.exec()
 
     def open_thixo3d_dialog(self):
         if not self.run or not self.run.points:
             QMessageBox.information(self, "No data", "Run a test (or load one) before viewing a 3D thixotropy loop.")
             return
-        dlg = Thixo3DDialog(self.run, parent=self)
+        try:
+            dlg = Thixo3DDialog(self.run, parent=self)
+        except RuntimeError as exc:
+            QMessageBox.critical(self, "3D plotting unavailable", str(exc))
+            return
         dlg.exec()
 
     # --------------------------------------------------------------- i/o
