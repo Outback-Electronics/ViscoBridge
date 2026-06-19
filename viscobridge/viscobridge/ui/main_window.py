@@ -268,7 +268,16 @@ class MainWindow(QMainWindow):
         visc = [p.viscosity_cp for p in self.run.points]
 
         self.viscosity_plot.clear()
-        self.viscosity_plot.plot_xy(gamma, visc, label="Viscosity")
+        if self.run.method.spindle.src:
+            self.viscosity_plot.set_labels("Shear Rate (1/s)", "Viscosity (cP)", "Viscosity vs Shear Rate")
+            self.viscosity_plot.plot_xy(gamma, visc, label="Viscosity")
+        else:
+            # This spindle has no defined true shear rate (SRC == 0, e.g.
+            # cylindrical RV/HA/HB spindles), so shear_rate is always 0 and
+            # plotting against it would just stack every point at x=0.
+            self.viscosity_plot.set_labels("RPM (no true shear rate for this spindle)",
+                                            "Viscosity (cP)", "Viscosity vs RPM")
+            self.viscosity_plot.plot_xy(rpm, visc, label="Viscosity")
         self.torque_plot.clear()
         self.torque_plot.plot_xy(t, torque, label="Torque %", marker="none", linestyle="-")
         self.temp_plot.clear()
