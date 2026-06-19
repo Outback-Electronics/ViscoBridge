@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import numpy as np
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from rheocalc32 import io_utils
+from rheocalc32.instruments import InstrumentDriver, InstrumentError, SerialInstrument, SimulatedInstrument
+from rheocalc32.models import DataPoint, Run, TestStep
+from rheocalc32.ui.connect_dialog import ConnectDialog
+from rheocalc32.ui.fit_dialog import FitDialog
+from rheocalc32.ui.method_editor import MethodEditor
+from rheocalc32.ui.plot_widget import PlotWidget
+
+DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
+                "Shear Stress (dyne/cm^2)", "Viscosity (cP)"]
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("RheoCalc32")
+        self.resize(1200, 800)
+
+        self.instrument: InstrumentDriver | None = None
+        self.run: Run | None = None
+        self.step_queue: list[TestStep] = []
+        self.current_step: TestStep | None = None
+        self.step_elapsed = 0.0
+        self.run_elapsed = 0.0
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+
+        self._build_ui()
+        self._build_menu()
+
+    # ---------------------------------------------------------------- UI
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        outer = QHBoxLayout(central)
+
+        splitter = QSplitter()
+        outer.addWidget(splitter)
+
+        self.method_editor = MethodEditor()
+        splitter.addWidget(self.method_editor)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+
+        btn_row = QHBoxLayout()
+        self.connect_btn = QPushButton("Connect...")
+        self.start_btn = QPushButton("Start Run")
+        self.stop_btn = QPushButton("Stop Run")
+        self.fit_btn = QPushButton("Fit Flow Curve...")
+        self.save_btn = QPushButton("Save Run...")
+        self.load_btn = QPushButton("Load Run...")
+        self.export_btn = QPushButton("Export CSV...")
+        for b in (self.connect_btn, self.start_btn, self.stop_btn, self.fit_btn,
+                  self.save_btn, self.load_btn, self.export_btn):
+            btn_row.addWidget(b)
+        right_layout.addLayout(btn_row)
+
+        self.connect_btn.clicked.connect(self.toggle_connect)
+        self.start_btn.clicked.connect(self.start_run)
+        self.stop_btn.clicked.connect(self.stop_run)
+        self.fit_btn.clicked.connect(self.open_fit_dialog)
+        self.save_btn.clicked.connect(self.save_run)
+        self.load_btn.clicked.connect(self.load_run)
+        self.export_btn.clicked.connect(self.export_csv)
+        self.stop_btn.setEnabled(False)
+
+        tabs = QTabWidget()
+        self.viscosity_plot = PlotWidget("Shear Rate (1/s)", "Viscosity (cP)", "Viscosity vs Shear Rate")
+        self.torque_plot = PlotWidget("Time (s)", "Torque (%)", "Torque vs Time")
+        self.temp_plot = PlotWidget("Time (s)", "Temperature (C)", "Temperature vs Time")
+        tabs.addTab(self.viscosity_plot, "Viscosity")
+        tabs.addTab(self.torque_plot, "Torque")
+        tabs.addTab(self.temp_plot, "Temperature")
+        right_layout.addWidget(tabs, stretch=2)
+
+        self.data_table = QTableWidget(0, len(DATA_COLUMNS))
+        self.data_table.setHorizontalHeaderLabels(DATA_COLUMNS)
+        right_layout.addWidget(self.data_table, stretch=1)
+
+        splitter.addWidget(right)
+        splitter.setStretchFactor(1, 1)
+
+        self.statusBar().showMessage("Disconnected")
+
+    def _build_menu(self):
+        file_menu = self.menuBar().addMenu("&File")
+        file_menu.addAction("Save Run...", self.save_run)
+        file_menu.addAction("Load Run...", self.load_run)
+        file_menu.addAction("Export CSV...", self.export_csv)
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+
+        analysis_menu = self.menuBar().addMenu("&Analysis")
+        analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
+
+        help_menu = self.menuBar().addMenu("&Help")
+        help_menu.addAction("About", self._show_about)
+
+    def _show_about(self):
+        QMessageBox.information(
+            self, "About RheoCalc32",
+            "RheoCalc32 (Python/PySide6 edition)\n\n"
+            "Rotational viscometer/rheometer control and rheological "
+            "analysis: step-based test methods, live data acquisition, "
+            "flow curve model fitting, and reporting."
+        )
+
+    # --------------------------------------------------------- instrument
+    def toggle_connect(self):
+        if self.instrument is not None and self.instrument.is_connected:
+            self.instrument.disconnect()
+            self.instrument = None
+            self.connect_btn.setText("Connect...")
+            self.statusBar().showMessage("Disconnected")
+            return
+
+        dlg = ConnectDialog(self)
+        if dlg.exec() != ConnectDialog.Accepted:
+            return
+
+        method = self.method_editor.get_method()
+        if dlg.use_simulated():
+            self.instrument = SimulatedInstrument(method.spindle, method.instrument_model,
+                                                    fluid_model="power_law", k=3.0, n=0.75)
+            status = "Connected (simulated instrument)"
+        else:
+            port = dlg.port()
+            if not port:
+                QMessageBox.warning(self, "No port", "Select or enter a serial port.")
+                return
+            self.instrument = SerialInstrument(port, baudrate=dlg.baudrate())
+            status = f"Connected to {port} @ {dlg.baudrate()} baud"
+
+        try:
+            self.instrument.connect()
+        except Exception as exc:
+            QMessageBox.critical(self, "Connection failed", str(exc))
+            self.instrument = None
+            return
+
+        self.connect_btn.setText("Disconnect")
+        self.statusBar().showMessage(status)
+
+    # --------------------------------------------------------------- run
+    def start_run(self):
+        if self.instrument is None or not self.instrument.is_connected:
+            QMessageBox.warning(self, "Not connected", "Connect to an instrument before starting a run.")
+            return
+        method = self.method_editor.get_method()
+        if not method.steps:
+            QMessageBox.warning(self, "No steps", "Add at least one test step to the method.")
+            return
+
+        sample = self.method_editor.get_sample()
+        self.run = Run(method=method, sample=sample, timestamp=datetime.now(timezone.utc).isoformat())
+        self.step_queue = list(method.steps)
+        self.current_step = None
+        self.run_elapsed = 0.0
+        self.data_table.setRowCount(0)
+        for plot in (self.viscosity_plot, self.torque_plot, self.temp_plot):
+            plot.clear()
+
+        self._advance_step()
+        self.timer.start(int(self.current_step.interval_s * 1000) if self.current_step else 1000)
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+
+    def _advance_step(self):
+        if not self.step_queue:
+            self.current_step = None
+            return
+        self.current_step = self.step_queue.pop(0)
+        self.step_elapsed = 0.0
+        if self.current_step.target_temp_c and self.instrument:
+            self.instrument.set_temperature(self.current_step.target_temp_c)
+
+    def stop_run(self):
+        self.timer.stop()
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.statusBar().showMessage("Run stopped")
+
+    def _tick(self):
+        if self.current_step is None or self.run is None or self.instrument is None:
+            self.stop_run()
+            return
+
+        step = self.current_step
+        frac = min(self.step_elapsed / step.duration_s, 1.0) if step.duration_s > 0 else 1.0
+        if step.step_type in ("Speed Ramp",):
+            target_rpm = step.start_speed_rpm + (step.end_speed_rpm - step.start_speed_rpm) * frac
+        else:
+            target_rpm = step.start_speed_rpm
+
+        try:
+            self.instrument.set_speed(target_rpm)
+            rpm, torque_pct, temp_c = self.instrument.read()
+        except InstrumentError as exc:
+            QMessageBox.critical(self, "Instrument error", str(exc))
+            self.stop_run()
+            return
+
+        spindle = self.run.method.spindle
+        tk = self.run.method.instrument_model.tk
+        # DV3T Appendix D: Viscosity(cP) = TK*SMC*100*%Torque/RPM;
+        # ShearRate(1/s) = SRC*RPM (0 if spindle has no defined true shear
+        # rate); ShearStress(dyne/cm^2) = TK*SMC*SRC*%Torque.
+        viscosity_cp = (tk * spindle.smc * 100.0 * torque_pct / rpm) if rpm > 0 else 0.0
+        shear_rate = spindle.src * rpm
+        shear_stress = tk * spindle.smc * spindle.src * torque_pct
+
+        point = DataPoint(self.run_elapsed, rpm, torque_pct, temp_c, shear_rate, shear_stress, viscosity_cp)
+        self.run.points.append(point)
+        self._append_row(point)
+        self._update_plots()
+
+        self.step_elapsed += step.interval_s
+        self.run_elapsed += step.interval_s
+        if self.step_elapsed >= step.duration_s:
+            self._advance_step()
+            if self.current_step is None:
+                self.stop_run()
+                self.statusBar().showMessage("Run complete")
+                return
+        self.timer.setInterval(int(max(self.current_step.interval_s, 0.05) * 1000))
+
+    def _append_row(self, p: DataPoint):
+        row = self.data_table.rowCount()
+        self.data_table.insertRow(row)
+        values = [p.t_s, p.rpm, p.torque_pct, p.temp_c, p.shear_rate, p.shear_stress, p.viscosity_cp]
+        for col, val in enumerate(values):
+            self.data_table.setItem(row, col, QTableWidgetItem(f"{val:.3f}"))
+
+    def _update_plots(self):
+        if not self.run or not self.run.points:
+            return
+        t = [p.t_s for p in self.run.points]
+        rpm = [p.rpm for p in self.run.points]
+        torque = [p.torque_pct for p in self.run.points]
+        temp = [p.temp_c for p in self.run.points]
+        gamma = [p.shear_rate for p in self.run.points]
+        visc = [p.viscosity_cp for p in self.run.points]
+
+        self.viscosity_plot.clear()
+        self.viscosity_plot.plot_xy(gamma, visc, label="Viscosity")
+        self.torque_plot.clear()
+        self.torque_plot.plot_xy(t, torque, label="Torque %", marker="none", linestyle="-")
+        self.temp_plot.clear()
+        self.temp_plot.plot_xy(t, temp, label="Temp", marker="none", linestyle="-")
+
+    # ----------------------------------------------------------- analysis
+    def open_fit_dialog(self):
+        if not self.run or not self.run.points:
+            QMessageBox.information(self, "No data", "Run a test (or load one) before fitting a model.")
+            return
+        gamma = np.array([p.shear_rate for p in self.run.points])
+        tau = np.array([p.shear_stress for p in self.run.points])
+        dlg = FitDialog(gamma, tau, parent=self)
+        dlg.exec()
+
+    # --------------------------------------------------------------- i/o
+    def save_run(self):
+        if not self.run:
+            QMessageBox.information(self, "No run", "There is no run to save yet.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save Run", filter="RheoCalc32 Run (*.rc32)")
+        if path:
+            io_utils.save_run(self.run, path)
+            self.statusBar().showMessage(f"Saved run to {path}")
+
+    def load_run(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load Run", filter="RheoCalc32 Run (*.rc32)")
+        if not path:
+            return
+        self.run = io_utils.load_run(path)
+        self.data_table.setRowCount(0)
+        for plot in (self.viscosity_plot, self.torque_plot, self.temp_plot):
+            plot.clear()
+        for p in self.run.points:
+            self._append_row(p)
+        self._update_plots()
+        self.statusBar().showMessage(f"Loaded run from {path}")
+
+    def export_csv(self):
+        if not self.run:
+            QMessageBox.information(self, "No run", "There is no run to export yet.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", filter="CSV Files (*.csv)")
+        if path:
+            io_utils.export_csv(self.run, path)
+            self.statusBar().showMessage(f"Exported CSV to {path}")
