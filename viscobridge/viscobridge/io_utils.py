@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 
-from rheocalc32.models import Run
+from viscobridge.models import Run
 
 
 def save_run(run: Run, path: str) -> None:

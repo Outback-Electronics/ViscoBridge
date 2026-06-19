@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from abc import ABC, abstractmethod
 
-from rheocalc32.constants import InstrumentModel, Spindle
+from viscobridge.constants import InstrumentModel, Spindle
 
 
 class InstrumentError(RuntimeError):

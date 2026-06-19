@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from rheocalc32.instruments import SerialInstrument
+from viscobridge.instruments import SerialInstrument
 
 
 class ConnectDialog(QDialog):

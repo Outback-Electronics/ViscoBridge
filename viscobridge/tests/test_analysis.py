@@ -1,6 +1,6 @@
 import numpy as np
 
-from rheocalc32 import analysis
+from viscobridge import analysis
 
 
 def test_power_law_fit_recovers_parameters():

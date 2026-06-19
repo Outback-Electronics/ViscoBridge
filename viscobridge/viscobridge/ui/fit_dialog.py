@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from rheocalc32 import analysis
-from rheocalc32.ui.plot_widget import PlotWidget
+from viscobridge import analysis
+from viscobridge.ui.plot_widget import PlotWidget
 
 
 class FitDialog(QDialog):
