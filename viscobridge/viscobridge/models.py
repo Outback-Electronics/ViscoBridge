@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
-from rheocalc32.constants import DEFAULT_SPINDLES, INSTRUMENT_MODELS, InstrumentModel, Spindle
+from viscobridge.constants import DEFAULT_SPINDLES, INSTRUMENT_MODELS, InstrumentModel, Spindle
 
 
 @dataclass

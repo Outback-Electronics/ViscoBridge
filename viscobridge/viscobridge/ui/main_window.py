@@ -18,14 +18,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from rheocalc32 import io_utils
-from rheocalc32.instruments import InstrumentDriver, InstrumentError, SerialInstrument, SimulatedInstrument
-from rheocalc32.models import DataPoint, Run, TestStep
-from rheocalc32.ui.calibration_dialog import CalibrationDialog
-from rheocalc32.ui.connect_dialog import ConnectDialog
-from rheocalc32.ui.fit_dialog import FitDialog
-from rheocalc32.ui.method_editor import MethodEditor
-from rheocalc32.ui.plot_widget import PlotWidget
+from viscobridge import io_utils
+from viscobridge.instruments import InstrumentDriver, InstrumentError, SerialInstrument, SimulatedInstrument
+from viscobridge.models import DataPoint, Run, TestStep
+from viscobridge.ui.calibration_dialog import CalibrationDialog
+from viscobridge.ui.connect_dialog import ConnectDialog
+from viscobridge.ui.fit_dialog import FitDialog
+from viscobridge.ui.method_editor import MethodEditor
+from viscobridge.ui.plot_widget import PlotWidget
 
 DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
                 "Shear Stress (dyne/cm^2)", "Viscosity (cP)"]
@@ -34,7 +34,7 @@ DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RheoCalc32")
+        self.setWindowTitle("ViscoBridge")
         self.resize(1200, 800)
 
         self.instrument: InstrumentDriver | None = None
@@ -124,8 +124,8 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.information(
-            self, "About RheoCalc32",
-            "RheoCalc32 (Python/PySide6 edition)\n\n"
+            self, "About ViscoBridge",
+            "ViscoBridge (Python/PySide6 edition)\n\n"
             "Rotational viscometer/rheometer control and rheological "
             "analysis: step-based test methods, live data acquisition, "
             "flow curve model fitting, and reporting."
@@ -299,13 +299,13 @@ class MainWindow(QMainWindow):
         if not self.run:
             QMessageBox.information(self, "No run", "There is no run to save yet.")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save Run", filter="RheoCalc32 Run (*.rc32)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Run", filter="ViscoBridge Run (*.vbr)")
         if path:
             io_utils.save_run(self.run, path)
             self.statusBar().showMessage(f"Saved run to {path}")
 
     def load_run(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load Run", filter="RheoCalc32 Run (*.rc32)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load Run", filter="ViscoBridge Run (*.vbr)")
         if not path:
             return
         self.run = io_utils.load_run(path)

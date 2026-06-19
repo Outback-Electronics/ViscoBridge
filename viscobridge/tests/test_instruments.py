@@ -1,6 +1,6 @@
 import pytest
 
-from rheocalc32.instruments import SerialInstrument
+from viscobridge.instruments import SerialInstrument
 
 
 class FakeSerial:

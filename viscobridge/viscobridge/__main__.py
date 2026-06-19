@@ -2,13 +2,13 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from rheocalc32.ui.main_window import MainWindow
+from viscobridge.ui.main_window import MainWindow
 
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("RheoCalc32")
-    app.setOrganizationName("RheoCalc32")
+    app.setApplicationName("ViscoBridge")
+    app.setOrganizationName("ViscoBridge")
     window = MainWindow()
     window.show()
     return app.exec()

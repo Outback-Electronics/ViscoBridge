@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from rheocalc32.instruments import InstrumentDriver, InstrumentError
+from viscobridge.instruments import InstrumentDriver, InstrumentError
 
 # How far the average/peak torque reading may stray from 0% with nothing
 # mounted before we call the zero calibration suspect.

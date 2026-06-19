@@ -1,5 +1,5 @@
-from rheocalc32.constants import INSTRUMENT_MODELS, Spindle
-from rheocalc32.models import DataPoint, Run, Sample, TestMethod, TestStep
+from viscobridge.constants import INSTRUMENT_MODELS, Spindle
+from viscobridge.models import DataPoint, Run, Sample, TestMethod, TestStep
 
 
 def test_run_json_roundtrip():

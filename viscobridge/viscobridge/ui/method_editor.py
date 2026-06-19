@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from rheocalc32.constants import DEFAULT_SPINDLES, INSTRUMENT_MODELS, STEP_TYPES
-from rheocalc32.models import Sample, TestMethod, TestStep
+from viscobridge.constants import DEFAULT_SPINDLES, INSTRUMENT_MODELS, STEP_TYPES
+from viscobridge.models import Sample, TestMethod, TestStep
 
 STEP_COLUMNS = ["Step Type", "Start RPM", "End RPM", "Duration (s)", "Interval (s)", "Target Temp (C)"]
 
