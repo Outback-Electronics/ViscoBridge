@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from viscobridge.constants import DEFAULT_SPINDLES, INSTRUMENT_MODELS, STEP_TYPES
 from viscobridge.models import Sample, TestMethod, TestStep
+from viscobridge.templates import TEST_TEMPLATES
 
 STEP_COLUMNS = ["Step Type", "Start RPM", "End RPM", "Duration (s)", "Interval (s)", "Target Temp (C)"]
 
@@ -84,6 +85,17 @@ class MethodEditor(QWidget):
         btn_row.addWidget(remove_btn)
         btn_row.addStretch()
         steps_layout.addLayout(btn_row)
+
+        template_row = QHBoxLayout()
+        self.template_combo = QComboBox()
+        self.template_combo.addItems(list(TEST_TEMPLATES.keys()))
+        load_template_btn = QPushButton("Load Template")
+        load_template_btn.clicked.connect(self.load_template)
+        template_row.addWidget(self.template_combo)
+        template_row.addWidget(load_template_btn)
+        template_row.addStretch()
+        steps_layout.addLayout(template_row)
+
         layout.addWidget(steps_box)
 
         self.add_step()
@@ -108,6 +120,21 @@ class MethodEditor(QWidget):
         row = self.steps_table.currentRow()
         if row >= 0:
             self.steps_table.removeRow(row)
+
+    def load_template(self):
+        steps = TEST_TEMPLATES[self.template_combo.currentText()]
+        self.steps_table.setRowCount(0)
+        for step in steps:
+            row = self.steps_table.rowCount()
+            self.steps_table.insertRow(row)
+            type_combo = QComboBox()
+            type_combo.addItems(STEP_TYPES)
+            type_combo.setCurrentText(step.step_type)
+            self.steps_table.setCellWidget(row, 0, type_combo)
+            values = [step.start_speed_rpm, step.end_speed_rpm, step.duration_s,
+                      step.interval_s, step.target_temp_c]
+            for col, val in enumerate(values, start=1):
+                self.steps_table.setItem(row, col, QTableWidgetItem(str(val)))
 
     def get_method(self) -> TestMethod:
         sp = self.spindle_combo.currentData()

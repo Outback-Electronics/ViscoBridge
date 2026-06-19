@@ -24,6 +24,14 @@ hardware compatibility.
   parameters (consistency index, flow index, yield stress, viscosity).
 - **Run management** — save/load runs as `.vbr` (JSON) files, export
   to CSV.
+- **Test templates** — one-click presets (Flow Curve, Thixotropic Index
+  Up-Down, Temperature Sweep, Time Hold stability check) to populate the
+  step table, RheoCalc Test-Wizard style.
+- **Run comparison** — overlay viscosity-vs-shear-rate curves from
+  multiple saved `.vbr` runs on one plot to compare samples/batches.
+- **Printable reports** — export a self-contained HTML report per run
+  with sample/method info, step table, embedded flow-curve chart, fit
+  results, and the full data table (opens and prints from any browser).
 
 ## Install
 
