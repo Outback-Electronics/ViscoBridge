@@ -390,6 +390,11 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Save Run", filter="ViscoBridge Run (*.vbr)")
         if path:
+            # Qt's native dialog on Linux doesn't auto-append the filter's
+            # extension, so a name typed without ".vbr" would otherwise be
+            # invisible to *.vbr-filtered Open dialogs elsewhere in the app.
+            if not path.lower().endswith(".vbr"):
+                path += ".vbr"
             io_utils.save_run(self.run, path)
             self.statusBar().showMessage(f"Saved run to {path}")
 
@@ -412,6 +417,8 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", filter="CSV Files (*.csv)")
         if path:
+            if not path.lower().endswith(".csv"):
+                path += ".csv"
             io_utils.export_csv(self.run, path)
             self.statusBar().showMessage(f"Exported CSV to {path}")
 
@@ -421,6 +428,8 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export Report", filter="HTML Report (*.html)")
         if path:
+            if not path.lower().endswith(".html"):
+                path += ".html"
             fit_result = self.last_fit_result if self.run.points else None
             report.generate_html_report(self.run, path, fit_result=fit_result)
             self.statusBar().showMessage(f"Exported report to {path}")
