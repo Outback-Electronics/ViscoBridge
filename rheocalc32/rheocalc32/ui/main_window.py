@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from rheocalc32 import io_utils
 from rheocalc32.instruments import InstrumentDriver, InstrumentError, SerialInstrument, SimulatedInstrument
 from rheocalc32.models import DataPoint, Run, TestStep
+from rheocalc32.ui.calibration_dialog import CalibrationDialog
 from rheocalc32.ui.connect_dialog import ConnectDialog
 from rheocalc32.ui.fit_dialog import FitDialog
 from rheocalc32.ui.method_editor import MethodEditor
@@ -114,6 +115,9 @@ class MainWindow(QMainWindow):
 
         analysis_menu = self.menuBar().addMenu("&Analysis")
         analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
+
+        instrument_menu = self.menuBar().addMenu("&Instrument")
+        instrument_menu.addAction("Calibration Check (30s, no spindle)...", self.open_calibration_dialog)
 
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction("About", self._show_about)
@@ -269,6 +273,16 @@ class MainWindow(QMainWindow):
         self.torque_plot.plot_xy(t, torque, label="Torque %", marker="none", linestyle="-")
         self.temp_plot.clear()
         self.temp_plot.plot_xy(t, temp, label="Temp", marker="none", linestyle="-")
+
+    def open_calibration_dialog(self):
+        if self.instrument is None or not self.instrument.is_connected:
+            QMessageBox.warning(self, "Not connected", "Connect to an instrument before running a calibration check.")
+            return
+        if self.timer.isActive():
+            QMessageBox.warning(self, "Run in progress", "Stop the current run before running a calibration check.")
+            return
+        dlg = CalibrationDialog(self.instrument, duration_s=30.0, parent=self)
+        dlg.exec()
 
     # ----------------------------------------------------------- analysis
     def open_fit_dialog(self):
