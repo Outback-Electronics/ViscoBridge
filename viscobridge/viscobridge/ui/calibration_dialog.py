@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QDialog,
@@ -30,6 +32,7 @@ class CalibrationDialog(QDialog):
         self.interval_s = 0.5
         self.elapsed_s = 0.0
         self.readings: list[float] = []
+        self.last_record: dict | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -99,7 +102,8 @@ class CalibrationDialog(QDialog):
 
         avg = sum(self.readings) / len(self.readings)
         peak = max(abs(r) for r in self.readings)
-        if peak <= TORQUE_TOLERANCE_PCT:
+        passed = peak <= TORQUE_TOLERANCE_PCT
+        if passed:
             self.status_label.setText(
                 f"PASS: avg torque {avg:.2f}%, peak |torque| {peak:.2f}% "
                 f"(within +/-{TORQUE_TOLERANCE_PCT:.0f}% of zero)."
@@ -110,6 +114,13 @@ class CalibrationDialog(QDialog):
                 f"exceeds +/-{TORQUE_TOLERANCE_PCT:.0f}% of zero. "
                 "Re-zero (reconnect) and check for spindle/debris/friction."
             )
+        self.last_record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "duration_s": self.duration_s,
+            "avg_torque_pct": avg,
+            "peak_torque_pct": peak,
+            "passed": passed,
+        }
         self.start_btn.setEnabled(True)
 
     def _on_close(self):

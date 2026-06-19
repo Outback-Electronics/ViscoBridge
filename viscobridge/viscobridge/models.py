@@ -61,6 +61,13 @@ class Run:
     sample: Sample
     timestamp: str
     points: list[DataPoint] = field(default_factory=list)
+    # Traceability: which physical instrument produced this data, the
+    # torque-transducer zero offset it was calibrated with at connect
+    # time, and the most recent unloaded calibration-check result before
+    # this run -- needed for audit trails (e.g. ISO/GxP lab compliance).
+    instrument_id: str = ""
+    zero_offset_counts: int | None = None
+    calibration_check: dict | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -69,6 +76,9 @@ class Run:
                 "sample": asdict(self.sample),
                 "timestamp": self.timestamp,
                 "points": [asdict(p) for p in self.points],
+                "instrument_id": self.instrument_id,
+                "zero_offset_counts": self.zero_offset_counts,
+                "calibration_check": self.calibration_check,
             },
             indent=2,
         )
@@ -79,4 +89,12 @@ class Run:
         method = TestMethod.from_dict(d["method"])
         sample = Sample(**d["sample"])
         points = [DataPoint(**p) for p in d["points"]]
-        return cls(method=method, sample=sample, timestamp=d["timestamp"], points=points)
+        return cls(
+            method=method,
+            sample=sample,
+            timestamp=d["timestamp"],
+            points=points,
+            instrument_id=d.get("instrument_id", ""),
+            zero_offset_counts=d.get("zero_offset_counts"),
+            calibration_check=d.get("calibration_check"),
+        )

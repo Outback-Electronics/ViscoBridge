@@ -41,14 +41,25 @@ def generate_html_report(run: Run, path: str, fit_result: FitResult | None = Non
     fit_html = ""
     if fit_result is not None:
         param_rows = "".join(
-            f"<tr><td>{escape(name)}</td><td>{val:.4g}</td></tr>"
-            for name, val in zip(fit_result.param_names, fit_result.params)
+            f"<tr><td>{escape(name)}</td><td>{val:.4g}</td><td>&plusmn;{err:.4g}</td></tr>"
+            for name, val, err in zip(fit_result.param_names, fit_result.params, fit_result.param_stderr)
         )
         fit_html = f"""
         <h2>Flow Curve Fit</h2>
-        <p>Model: {escape(fit_result.model_name)} &mdash; R&sup2; = {fit_result.r_squared:.4f}</p>
-        <table><tr><th>Parameter</th><th>Value</th></tr>{param_rows}</table>
+        <p>Model: {escape(fit_result.model_name)} &mdash; R&sup2; = {fit_result.r_squared:.4f},
+           AIC = {fit_result.aic:.2f}, BIC = {fit_result.bic:.2f} (lower is better-supported)</p>
+        <table><tr><th>Parameter</th><th>Value</th><th>Std. Error</th></tr>{param_rows}</table>
         """
+
+    calib = run.calibration_check or {}
+    calib_html = ""
+    if calib:
+        status = "PASS" if calib.get("passed") else "FAIL"
+        calib_html = (
+            f"<tr><th>Last calibration check</th><td>{escape(status)} "
+            f"(avg {calib.get('avg_torque_pct', 0):.2f}%, peak {calib.get('peak_torque_pct', 0):.2f}%, "
+            f"{escape(calib.get('timestamp', ''))})</td></tr>"
+        )
 
     steps_html = "".join(
         f"<tr><td>{escape(s.step_type)}</td><td>{s.start_speed_rpm:.2f}</td>"
@@ -82,6 +93,9 @@ def generate_html_report(run: Run, path: str, fit_result: FitResult | None = Non
     <tr><th>Instrument model</th><td>{escape(run.method.instrument_model.name)}</td></tr>
     <tr><th>Spindle</th><td>{escape(run.method.spindle.name)} (SMC={run.method.spindle.smc}, SRC={run.method.spindle.src})</td></tr>
     <tr><th>Container</th><td>{escape(run.method.container)}</td></tr>
+    <tr><th>Instrument ID</th><td>{escape(run.instrument_id or "(simulated / unknown)")}</td></tr>
+    <tr><th>Zero offset (counts)</th><td>{run.zero_offset_counts if run.zero_offset_counts is not None else "n/a"}</td></tr>
+    {calib_html}
   </table>
 
   <h2>Test Steps</h2>

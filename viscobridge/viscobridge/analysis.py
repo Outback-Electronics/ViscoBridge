@@ -67,10 +67,31 @@ class FitResult:
     params: np.ndarray
     covariance: np.ndarray
     r_squared: float
+    param_stderr: np.ndarray
+    aic: float
+    bic: float
+    residuals: np.ndarray
+    x: np.ndarray
 
     def __str__(self) -> str:
-        parts = [f"{name} = {val:.4g}" for name, val in zip(self.param_names, self.params)]
-        return f"{self.model_name}: " + ", ".join(parts) + f"  (R^2={self.r_squared:.4f})"
+        parts = [
+            f"{name} = {val:.4g} +/- {err:.4g}"
+            for name, val, err in zip(self.param_names, self.params, self.param_stderr)
+        ]
+        return (
+            f"{self.model_name}: " + ", ".join(parts)
+            + f"  (R^2={self.r_squared:.4f}, AIC={self.aic:.2f}, BIC={self.bic:.2f})"
+        )
+
+
+def _aic_bic(n: int, k: int, ss_res: float) -> tuple[float, float]:
+    # Gaussian-error AIC/BIC from residual sum of squares (standard form
+    # for least-squares regression model comparison).
+    if n <= 0 or ss_res <= 0:
+        return float("nan"), float("nan")
+    aic = n * np.log(ss_res / n) + 2 * k
+    bic = n * np.log(ss_res / n) + k * np.log(n)
+    return aic, bic
 
 
 def fit_model(model_name: str, shear_rate: np.ndarray, shear_stress: np.ndarray) -> FitResult:
@@ -87,12 +108,74 @@ def fit_model(model_name: str, shear_rate: np.ndarray, shear_stress: np.ndarray)
     p0 = spec["p0"](gamma, tau)
     params, cov = curve_fit(spec["func"], gamma, tau, p0=p0, bounds=spec["bounds"], maxfev=10000)
     predicted = spec["func"](gamma, *params)
-    ss_res = np.sum((tau - predicted) ** 2)
+    residuals = tau - predicted
+    ss_res = np.sum(residuals**2)
     ss_tot = np.sum((tau - np.mean(tau)) ** 2)
     r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    return FitResult(model_name, spec["params"], params, cov, r_squared)
+    stderr = np.sqrt(np.clip(np.diag(cov), 0, None))
+    aic, bic = _aic_bic(len(gamma), len(params), ss_res)
+    return FitResult(model_name, spec["params"], params, cov, r_squared, stderr, aic, bic, residuals, gamma)
 
 
 def predict(model_name: str, params: np.ndarray, shear_rate: np.ndarray) -> np.ndarray:
     spec = MODELS[model_name]
     return spec["func"](np.asarray(shear_rate, dtype=float), *params)
+
+
+# ---------------------------------------------------------------------------
+# Temperature-dependence models (Arrhenius, WLF) for fitting viscosity vs.
+# temperature data, e.g. from a Temperature Sweep test.
+# ---------------------------------------------------------------------------
+
+def _arrhenius(temp_c, a, ea_over_r):
+    temp_k = np.asarray(temp_c, dtype=float) + 273.15
+    return a * np.exp(ea_over_r / temp_k)
+
+
+def _wlf(temp_c, mu_ref, c1, c2, t_ref_c=25.0):
+    temp_c = np.asarray(temp_c, dtype=float)
+    dt = temp_c - t_ref_c
+    log_shift = -c1 * dt / (c2 + dt)
+    return mu_ref * np.power(10.0, log_shift)
+
+
+TEMP_MODELS = {
+    "Arrhenius": {
+        "func": _arrhenius,
+        "params": ["A (pre-exponential)", "Ea/R (activation energy / gas const, K)"],
+        "p0": lambda temp, visc: [np.min(visc), 2000.0],
+        "bounds": (0, np.inf),
+    },
+    "WLF": {
+        "func": _wlf,
+        "params": ["mu_ref (viscosity @ Tref)", "C1", "C2 (K)"],
+        "p0": lambda temp, visc: [np.mean(visc), 10.0, 100.0],
+        "bounds": ([0, 0, 1e-3], [np.inf, 100, np.inf]),
+    },
+}
+
+
+def fit_temperature_model(model_name: str, temp_c: np.ndarray, viscosity: np.ndarray) -> FitResult:
+    if model_name not in TEMP_MODELS:
+        raise ValueError(f"Unknown temperature model: {model_name}")
+    spec = TEMP_MODELS[model_name]
+    temp_c = np.asarray(temp_c, dtype=float)
+    visc = np.asarray(viscosity, dtype=float)
+    if len(temp_c) < len(spec["params"]) + 1:
+        raise ValueError("Not enough data points to fit this model")
+
+    p0 = spec["p0"](temp_c, visc)
+    params, cov = curve_fit(spec["func"], temp_c, visc, p0=p0, bounds=spec["bounds"], maxfev=10000)
+    predicted = spec["func"](temp_c, *params)
+    residuals = visc - predicted
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((visc - np.mean(visc)) ** 2)
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    stderr = np.sqrt(np.clip(np.diag(cov), 0, None))
+    aic, bic = _aic_bic(len(temp_c), len(params), ss_res)
+    return FitResult(model_name, spec["params"], params, cov, r_squared, stderr, aic, bic, residuals, temp_c)
+
+
+def predict_temperature(model_name: str, params: np.ndarray, temp_c: np.ndarray) -> np.ndarray:
+    spec = TEMP_MODELS[model_name]
+    return spec["func"](np.asarray(temp_c, dtype=float), *params)
