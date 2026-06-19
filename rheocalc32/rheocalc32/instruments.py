@@ -191,18 +191,27 @@ class SerialInstrument(InstrumentDriver):
     def is_connected(self) -> bool:
         return self._serial is not None and self._serial.is_open
 
-    def _send(self, body: str) -> str:
+    def _send(self, body: str, timeout: float | None = None) -> str:
         if self._serial is None or not self._serial.is_open:
             raise InstrumentError("Instrument not connected")
-        self._serial.write((body + "\r").encode("ascii"))
-        raw = self._serial.read_until(b"\r")
+        prev_timeout = self._serial.timeout
+        if timeout is not None:
+            self._serial.timeout = timeout
+        try:
+            self._serial.write((body + "\r").encode("ascii"))
+            raw = self._serial.read_until(b"\r")
+        finally:
+            self._serial.timeout = prev_timeout
         reply = raw.decode("ascii", errors="replace").strip()
         if not reply:
             raise InstrumentError(f"No response from instrument to command {body!r}")
         return reply
 
     def _zero(self) -> None:
-        reply = self._send("Z")
+        # The Z command physically re-zeros the torque transducer, which
+        # the front-panel autozero takes ~15s to do -- give it much more
+        # time than the default read timeout used for other commands.
+        reply = self._send("Z", timeout=20.0)
         if not reply.startswith("Z") or len(reply) < 7:
             raise InstrumentError(f"Unexpected Zero reply: {reply!r}")
         self._zero_offset = int(reply[1:5], 16)

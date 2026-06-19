@@ -10,6 +10,7 @@ class FakeSerial:
         self._replies = list(replies)
         self.is_open = True
         self.written = []
+        self.timeout = 1.0
 
     def write(self, data):
         self.written.append(data)
