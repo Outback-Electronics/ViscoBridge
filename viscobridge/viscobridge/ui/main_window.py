@@ -6,12 +6,12 @@ import numpy as np
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSplitter,
-    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -27,9 +27,7 @@ from viscobridge.ui.connect_dialog import ConnectDialog
 from viscobridge.ui.fit_dialog import FitDialog
 from viscobridge.ui.method_editor import MethodEditor
 from viscobridge.ui.plot_widget import PlotWidget
-from viscobridge.ui.surface3d_dialog import Surface3DDialog
 from viscobridge.ui.temp_fit_dialog import TempFitDialog
-from viscobridge.ui.thixo3d_dialog import Thixo3DDialog
 
 DATA_COLUMNS = ["Time (s)", "RPM", "Torque (%)", "Temp (C)", "Shear Rate (1/s)",
                 "Shear Stress (dyne/cm^2)", "Viscosity (cP)"]
@@ -100,14 +98,17 @@ class MainWindow(QMainWindow):
         self.compare_btn.clicked.connect(self.open_compare_dialog)
         self.stop_btn.setEnabled(False)
 
-        tabs = QTabWidget()
+        dashboard = QWidget()
+        grid = QGridLayout(dashboard)
         self.viscosity_plot = PlotWidget("Shear Rate (1/s)", "Viscosity (cP)", "Viscosity vs Shear Rate")
-        self.torque_plot = PlotWidget("Time (s)", "Torque (%)", "Torque vs Time")
+        self.stress_plot = PlotWidget("Shear Rate (1/s)", "Shear Stress (dyne/cm^2)", "Shear Stress vs Shear Rate")
+        self.viscosity_time_plot = PlotWidget("Time (s)", "Viscosity (cP)", "Viscosity vs Time")
         self.temp_plot = PlotWidget("Time (s)", "Temperature (C)", "Temperature vs Time")
-        tabs.addTab(self.viscosity_plot, "Viscosity")
-        tabs.addTab(self.torque_plot, "Torque")
-        tabs.addTab(self.temp_plot, "Temperature")
-        right_layout.addWidget(tabs, stretch=2)
+        grid.addWidget(self.viscosity_plot, 0, 0)
+        grid.addWidget(self.stress_plot, 0, 1)
+        grid.addWidget(self.viscosity_time_plot, 1, 0)
+        grid.addWidget(self.temp_plot, 1, 1)
+        right_layout.addWidget(dashboard, stretch=2)
 
         self.data_table = QTableWidget(0, len(DATA_COLUMNS))
         self.data_table.setHorizontalHeaderLabels(DATA_COLUMNS)
@@ -131,9 +132,6 @@ class MainWindow(QMainWindow):
         analysis_menu.addAction("Fit Flow Curve...", self.open_fit_dialog)
         analysis_menu.addAction("Fit Temperature Dependence...", self.open_temp_fit_dialog)
         analysis_menu.addAction("Compare Runs...", self.open_compare_dialog)
-        analysis_menu.addSeparator()
-        analysis_menu.addAction("3D Viscosity Surface...", self.open_surface3d_dialog)
-        analysis_menu.addAction("3D Thixotropy Loop...", self.open_thixo3d_dialog)
 
         instrument_menu = self.menuBar().addMenu("&Instrument")
         instrument_menu.addAction("Calibration Check (30s, no spindle)...", self.open_calibration_dialog)
@@ -219,7 +217,7 @@ class MainWindow(QMainWindow):
         self.run_elapsed = 0.0
         self.last_fit_result = None
         self.data_table.setRowCount(0)
-        for plot in (self.viscosity_plot, self.torque_plot, self.temp_plot):
+        for plot in (self.viscosity_plot, self.stress_plot, self.viscosity_time_plot, self.temp_plot):
             plot.clear()
 
         self._advance_step()
@@ -299,15 +297,19 @@ class MainWindow(QMainWindow):
             return
         t = [p.t_s for p in self.run.points]
         rpm = [p.rpm for p in self.run.points]
-        torque = [p.torque_pct for p in self.run.points]
         temp = [p.temp_c for p in self.run.points]
         gamma = [p.shear_rate for p in self.run.points]
         visc = [p.viscosity_cp for p in self.run.points]
 
+        stress = [p.shear_stress for p in self.run.points]
+
         self.viscosity_plot.clear()
+        self.stress_plot.clear()
         if self.run.method.spindle.src:
             self.viscosity_plot.set_labels("Shear Rate (1/s)", "Viscosity (cP)", "Viscosity vs Shear Rate")
             self.viscosity_plot.plot_xy(gamma, visc, label="Viscosity")
+            self.stress_plot.set_labels("Shear Rate (1/s)", "Shear Stress (dyne/cm^2)", "Shear Stress vs Shear Rate")
+            self.stress_plot.plot_xy(gamma, stress, label="Shear Stress")
         else:
             # This spindle has no defined true shear rate (SRC == 0, e.g.
             # cylindrical RV/HA/HB spindles), so shear_rate is always 0 and
@@ -315,8 +317,11 @@ class MainWindow(QMainWindow):
             self.viscosity_plot.set_labels("RPM (no true shear rate for this spindle)",
                                             "Viscosity (cP)", "Viscosity vs RPM")
             self.viscosity_plot.plot_xy(rpm, visc, label="Viscosity")
-        self.torque_plot.clear()
-        self.torque_plot.plot_xy(t, torque, label="Torque %", marker="none", linestyle="-")
+            self.stress_plot.set_labels("RPM (no true shear rate for this spindle)",
+                                         "Shear Stress (dyne/cm^2)", "Shear Stress vs RPM")
+            self.stress_plot.plot_xy(rpm, stress, label="Shear Stress")
+        self.viscosity_time_plot.clear()
+        self.viscosity_time_plot.plot_xy(t, visc, label="Viscosity", marker="none", linestyle="-")
         self.temp_plot.clear()
         self.temp_plot.plot_xy(t, temp, label="Temp", marker="none", linestyle="-")
 
@@ -364,25 +369,6 @@ class MainWindow(QMainWindow):
         dlg = TempFitDialog(temp, visc, parent=self)
         dlg.exec()
 
-    def open_surface3d_dialog(self):
-        try:
-            dlg = Surface3DDialog(parent=self)
-        except RuntimeError as exc:
-            QMessageBox.critical(self, "3D plotting unavailable", str(exc))
-            return
-        dlg.exec()
-
-    def open_thixo3d_dialog(self):
-        if not self.run or not self.run.points:
-            QMessageBox.information(self, "No data", "Run a test (or load one) before viewing a 3D thixotropy loop.")
-            return
-        try:
-            dlg = Thixo3DDialog(self.run, parent=self)
-        except RuntimeError as exc:
-            QMessageBox.critical(self, "3D plotting unavailable", str(exc))
-            return
-        dlg.exec()
-
     # --------------------------------------------------------------- i/o
     def save_run(self):
         if not self.run:
@@ -390,6 +376,11 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Save Run", filter="ViscoBridge Run (*.vbr)")
         if path:
+            # Qt's native dialog on Linux doesn't auto-append the filter's
+            # extension, so a name typed without ".vbr" would otherwise be
+            # invisible to *.vbr-filtered Open dialogs elsewhere in the app.
+            if not path.lower().endswith(".vbr"):
+                path += ".vbr"
             io_utils.save_run(self.run, path)
             self.statusBar().showMessage(f"Saved run to {path}")
 
@@ -399,7 +390,7 @@ class MainWindow(QMainWindow):
             return
         self.run = io_utils.load_run(path)
         self.data_table.setRowCount(0)
-        for plot in (self.viscosity_plot, self.torque_plot, self.temp_plot):
+        for plot in (self.viscosity_plot, self.stress_plot, self.viscosity_time_plot, self.temp_plot):
             plot.clear()
         for p in self.run.points:
             self._append_row(p)
@@ -412,6 +403,8 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", filter="CSV Files (*.csv)")
         if path:
+            if not path.lower().endswith(".csv"):
+                path += ".csv"
             io_utils.export_csv(self.run, path)
             self.statusBar().showMessage(f"Exported CSV to {path}")
 
@@ -421,6 +414,8 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export Report", filter="HTML Report (*.html)")
         if path:
+            if not path.lower().endswith(".html"):
+                path += ".html"
             fit_result = self.last_fit_result if self.run.points else None
             report.generate_html_report(self.run, path, fit_result=fit_result)
             self.statusBar().showMessage(f"Exported report to {path}")

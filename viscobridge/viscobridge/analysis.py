@@ -179,29 +179,3 @@ def fit_temperature_model(model_name: str, temp_c: np.ndarray, viscosity: np.nda
 def predict_temperature(model_name: str, params: np.ndarray, temp_c: np.ndarray) -> np.ndarray:
     spec = TEMP_MODELS[model_name]
     return spec["func"](np.asarray(temp_c, dtype=float), *params)
-
-
-def confidence_ellipsoid(params: np.ndarray, covariance: np.ndarray, n_std: float = 2.0, resolution: int = 30):
-    """For a 3-parameter fit, returns (x, y, z) mesh arrays tracing the
-    n_std-sigma joint confidence ellipsoid implied by the fit's covariance
-    matrix (eigendecomposition of cov scales a unit sphere by sqrt(eigenvalues)
-    along the principal axes, same idea as a 2D confidence ellipse extended
-    to 3D)."""
-    if len(params) != 3:
-        raise ValueError("Confidence ellipsoid requires exactly 3 fit parameters")
-
-    eigvals, eigvecs = np.linalg.eigh(covariance)
-    eigvals = np.clip(eigvals, 0, None)
-    radii = n_std * np.sqrt(eigvals)
-
-    u = np.linspace(0, 2 * np.pi, resolution)
-    v = np.linspace(0, np.pi, resolution)
-    sphere_x = np.outer(np.cos(u), np.sin(v))
-    sphere_y = np.outer(np.sin(u), np.sin(v))
-    sphere_z = np.outer(np.ones_like(u), np.cos(v))
-
-    shape = sphere_x.shape
-    points = np.stack([sphere_x.ravel(), sphere_y.ravel(), sphere_z.ravel()], axis=0) * radii[:, None]
-    transformed = (eigvecs @ points) + np.asarray(params)[:, None]
-    x, y, z = (transformed[i].reshape(shape) for i in range(3))
-    return x, y, z
